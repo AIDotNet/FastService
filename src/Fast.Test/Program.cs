@@ -1,3 +1,4 @@
+using FastService.Extensions;
 using Scalar.AspNetCore;
 
 namespace Fast.Test
