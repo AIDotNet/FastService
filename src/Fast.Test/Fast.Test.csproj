@@ -12,11 +12,11 @@
 	  <PackageReference Include="Scalar.AspNetCore" Version="1.2.76" />
 	  <ProjectReference Include="..\Fast.Application\Fast.Application.csproj" />
 	  <ProjectReference Include="..\FastService\FastService.csproj" />
-	  <ProjectReference Include="..\FastService.Analyzers\FastService.Analyzers.csproj">
-		  <PrivateAssets>all</PrivateAssets>
-		  <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-		  <OutputItemType>Analyzer</OutputItemType>
-	  </ProjectReference>
+      <ProjectReference Include="..\FastService.Analyzers\FastService.Analyzers.csproj">
+          <PrivateAssets>all</PrivateAssets>
+          <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+          <OutputItemType>Analyzer</OutputItemType>
+      </ProjectReference>
 
   </ItemGroup>
 

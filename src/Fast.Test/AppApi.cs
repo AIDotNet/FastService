@@ -4,9 +4,9 @@ namespace Fast.Test
 {
 	public class AppService : FastApi
 	{
-		public static Task CreateAsync()
+		public Task<string> CreateAsync()
 		{
-			return Task.CompletedTask;
+			return Task.FromResult("asd");
 		}
 	}
 }

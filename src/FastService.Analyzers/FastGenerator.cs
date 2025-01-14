@@ -24,6 +24,12 @@ namespace FastService.Analyzers
 				var symbol = compilation.GetAssemblyOrModuleSymbol(reference);
 				if (symbol is IAssemblySymbol assemblySymbol)
 				{
+					// 过滤掉微软的 System 程序集
+					if (assemblySymbol.Name.StartsWith("System", StringComparison.OrdinalIgnoreCase) || assemblySymbol.Name.StartsWith("Microsoft.",StringComparison.CurrentCultureIgnoreCase))
+					{
+						continue;
+					}
+
 					foreach (var type in assemblySymbol.GlobalNamespace.GetNamespaceTypes())
 					{
 						// 检查类型是否继承自 FastService
@@ -53,15 +59,23 @@ namespace FastService.Analyzers
 				.Where(m => m.DeclaredAccessibility == Accessibility.Public && !m.IsStatic && m.MethodKind == MethodKind.Ordinary)
 				.ToList();
 
-			// 获取属性等，省略具体实现
+			// 获取类级别的特性
+			var attributes = classSymbol.GetAttributes();
 
-			return new ClassInfo
+			// 获取 RouteAttribute
+			var routeAttr = attributes.FirstOrDefault(a => a.AttributeClass?.Name == "RouteAttribute");
+			var route = routeAttr?.ConstructorArguments.FirstOrDefault().Value as string ?? $"/api/{className.TrimEnd("Service")}";
+
+			var info = new ClassInfo
 			{
 				Namespace = namespaceName,
 				ClassName = className,
 				// 其他属性赋值
-				Methods = methods
+				Methods = methods,
+				Route = route
 			};
+
+			return info;
 		}
 
 		public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -129,7 +143,6 @@ namespace FastService.Analyzers
 			// 获取 RouteAttribute
 			var routeAttr = attributes.FirstOrDefault(a => a.AttributeClass?.Name == "RouteAttribute");
 			var route = routeAttr?.ConstructorArguments.FirstOrDefault().Value as string ?? $"/api/{className.TrimEnd("Service")}";
-
 			// 获取 Tags 属性
 			var tagsAttr = attributes.FirstOrDefault(a => a.AttributeClass?.Name == "Tags");
 			var tags = tagsAttr?.ConstructorArguments.FirstOrDefault().Value as string;
@@ -259,6 +272,9 @@ namespace FastService.Analyzers
 			foreach (var classInfo in classInfos)
 			{
 				var instanceName = Char.ToLowerInvariant(classInfo.ClassName[0]) + classInfo.ClassName.TrimEnd("Service");
+
+				// 获取classInfo的特性
+
 				sb.AppendLine($"            var {instanceName} = app.MapGroup(\"{classInfo.Route}\"){GenerateClassAttributes(classInfo)};");
 
 				foreach (var method in classInfo.Methods)
@@ -466,6 +482,7 @@ namespace FastService.Analyzers
 			public string? Tags { get; set; }
 			public List<AttributeData> FilterAttributes { get; set; } = new List<AttributeData>();
 			public List<IMethodSymbol> Methods { get; set; } = new List<IMethodSymbol>();
+
 		}
 	}
 }

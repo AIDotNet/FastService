@@ -4,8 +4,9 @@ using FastService;
 namespace Fast.Application
 {
 	[Filter(typeof(TestFilter))]
+	[Route("/api/test1")]
 	[Tags("测试组")]
-	public class TestApi : FastService.FastApi
+	public class TestApi : FastApi
 	{
 
 		[EndpointSummary("获取测试接口")]

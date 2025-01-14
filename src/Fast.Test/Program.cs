@@ -1,4 +1,5 @@
 using FastService.Extensions;
+using Microsoft.AspNetCore.Builder;
 using Scalar.AspNetCore;
 
 namespace Fast.Test
@@ -28,10 +29,10 @@ namespace Fast.Test
 
 			app.MapGet("test",
 				[EndpointSummary("")]
-				() =>
-			{
+			() =>
+				{
 
-			});
+				});
 
 			app.Run();
 
