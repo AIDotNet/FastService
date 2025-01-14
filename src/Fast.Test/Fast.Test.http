@@ -1,0 +1,6 @@
+@Fast.Test_HostAddress = http://localhost:5252
+
+GET {{Fast.Test_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
