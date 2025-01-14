@@ -1,5 +1,4 @@
 <Project>
-  <!-- See https://aka.ms/dotnet/msbuild/customize for more details on customizing your build -->
   <PropertyGroup>
     <Version>0.1.0</Version>
     <Company>AIDotNet</Company>
@@ -9,7 +8,6 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/AIDotNet/FastService</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 </Project>
