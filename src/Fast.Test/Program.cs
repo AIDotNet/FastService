@@ -1,5 +1,5 @@
-using Fast.Extensions;
 using Scalar.AspNetCore;
+
 namespace Fast.Test
 {
 	public class Program
@@ -33,6 +33,7 @@ namespace Fast.Test
 			});
 
 			app.Run();
+
 		}
 	}
 }

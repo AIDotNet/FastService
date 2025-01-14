@@ -1,4 +1,4 @@
-﻿namespace Fast
+﻿namespace FastService
 {
 	public class FastOption
 	{

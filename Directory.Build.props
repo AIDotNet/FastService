@@ -1,0 +1,15 @@
+<Project>
+  <!-- See https://aka.ms/dotnet/msbuild/customize for more details on customizing your build -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Company>AIDotNet</Company>
+    <Authors>Token</Authors>
+    <Description>自动依赖注入，利用源生成器实现自动依赖注入，并且不使用反射进行实现功能。</Description>
+    <PackageProjectUrl>https://github.com/AIDotNet/FastService</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/AIDotNet/FastService</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+</Project>

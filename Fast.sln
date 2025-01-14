@@ -5,11 +5,18 @@ VisualStudioVersion = 17.13.35617.110 d17.13
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fast.Analyzers", "src\Fast.Analyzers\Fast.Analyzers.csproj", "{8E287A18-1507-47D9-A12C-FC81B36F0448}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FastService.Analyzers", "src\FastService.Analyzers\FastService.Analyzers.csproj", "{8E287A18-1507-47D9-A12C-FC81B36F0448}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fast", "src\Fast\Fast.csproj", "{FE28C21E-21CA-4264-B9B7-CDF3CD4A7090}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FastService", "src\FastService\FastService.csproj", "{FE28C21E-21CA-4264-B9B7-CDF3CD4A7090}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fast.Test", "src\Fast.Test\Fast.Test.csproj", "{480BBCBC-74DF-4653-A995-D619E9E53A4A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fast.Application", "src\Fast.Application\Fast.Application.csproj", "{2ED71C10-4071-4D16-B03D-7BA89B5762A6}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{522EB701-F08A-4B98-99BB-46A9BE3038EE}"
+	ProjectSection(SolutionItems) = preProject
+		Directory.Build.props = Directory.Build.props
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -29,6 +36,10 @@ Global
 		{480BBCBC-74DF-4653-A995-D619E9E53A4A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{480BBCBC-74DF-4653-A995-D619E9E53A4A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{480BBCBC-74DF-4653-A995-D619E9E53A4A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2ED71C10-4071-4D16-B03D-7BA89B5762A6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2ED71C10-4071-4D16-B03D-7BA89B5762A6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2ED71C10-4071-4D16-B03D-7BA89B5762A6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2ED71C10-4071-4D16-B03D-7BA89B5762A6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -37,6 +48,7 @@ Global
 		{8E287A18-1507-47D9-A12C-FC81B36F0448} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{FE28C21E-21CA-4264-B9B7-CDF3CD4A7090} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{480BBCBC-74DF-4653-A995-D619E9E53A4A} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{2ED71C10-4071-4D16-B03D-7BA89B5762A6} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B0FD0C03-D0B9-4969-905B-8787FD5C30AC}

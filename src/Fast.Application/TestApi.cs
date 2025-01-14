@@ -1,8 +1,11 @@
-﻿namespace Fast.Test
+﻿using Fast.Test;
+using FastService;
+
+namespace Fast.Application
 {
 	[Filter(typeof(TestFilter))]
 	[Tags("测试组")]
-	public class TestService : FastService
+	public class TestApi : FastService.FastApi
 	{
 
 		[EndpointSummary("获取测试接口")]

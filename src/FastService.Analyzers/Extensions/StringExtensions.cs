@@ -1,4 +1,4 @@
-﻿namespace Fast.Extensions
+﻿namespace FastService.Analyzers.Extensions
 {
 	public static class StringExtensions
 	{
