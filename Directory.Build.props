@@ -3,7 +3,7 @@
     <Version>0.1.1</Version>
     <Company>AIDotNet</Company>
     <Authors>Token</Authors>
-    <Description>实现将Service映射MiniApis，快速简单应用！</Description>
+    <Description>简单将Service映射MiniApis，快速简单应用！</Description>
     <PackageProjectUrl>https://github.com/AIDotNet/FastService</PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/AIDotNet/FastService</RepositoryUrl>
