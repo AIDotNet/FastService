@@ -297,12 +297,12 @@ namespace FastService.Analyzers
         {
             var sb = new StringBuilder();
             foreach (var classInfo in classInfos)
-            {
-                var instanceName = classInfo.ClassName.TrimEnd("Service").ToLower();
+			{
+				var instanceName = Char.ToLowerInvariant(classInfo.ClassName[0]) +
+								   classInfo.ClassName.TrimEnd("Service");
+				// 获取classInfo的特性
 
-                // 获取classInfo的特性
-
-                sb.AppendLine(
+				sb.AppendLine(
                     $"            var {instanceName} = app.MapGroup(\"{classInfo.Route}\"){GenerateClassAttributes(classInfo)};");
 
                 foreach (var method in classInfo.Methods)
