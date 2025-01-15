@@ -1,5 +1,3 @@
-using FastService.Extensions;
-using Microsoft.AspNetCore.Builder;
 using Scalar.AspNetCore;
 
 namespace Fast.Test
