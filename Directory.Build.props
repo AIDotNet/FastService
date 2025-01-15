@@ -9,6 +9,5 @@
     <RepositoryUrl>https://github.com/AIDotNet/FastService</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-	  
   </PropertyGroup>
 </Project>
