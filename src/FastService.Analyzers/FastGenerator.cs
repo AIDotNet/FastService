@@ -156,6 +156,8 @@ namespace FastService.Analyzers
             var filterAttributes = attributes.Where(a =>
                 a.AttributeClass?.Name == "FilterAttribute" || a.AttributeClass?.Name == "Filter").ToList();
 
+            var authorize = attributes.Where(a => a.AttributeClass?.Name.StartsWith("Authorize") == true).ToList();
+
             // 获取所有公共非静态方法
             var methods = classSymbol.GetMembers().OfType<IMethodSymbol>()
                 .Where(m => m.DeclaredAccessibility == Accessibility.Public && !m.IsStatic &&
@@ -167,6 +169,7 @@ namespace FastService.Analyzers
                 Namespace = namespaceName,
                 ClassName = className,
                 Route = route,
+                AuthorizeAttributes = authorize,
                 Tags = tags,
                 FilterAttributes = filterAttributes,
                 Methods = methods
@@ -200,7 +203,7 @@ namespace FastService.Analyzers
 
             var parts = new Stack<string>();
             var current = namespaceSymbol;
-            while (current != null && !current.IsGlobalNamespace)
+            while (current is { IsGlobalNamespace: false })
             {
                 parts.Push(current.Name);
                 current = current.ContainingNamespace;
@@ -298,7 +301,7 @@ namespace FastService.Analyzers
             var sb = new StringBuilder();
             foreach (var classInfo in classInfos)
 			{
-				var instanceName = Char.ToLowerInvariant(classInfo.ClassName[0]) +
+				var instanceName = char.ToLowerInvariant(classInfo.ClassName[0]) +
 								   classInfo.ClassName.TrimEnd("Service");
 				// 获取classInfo的特性
 
@@ -331,7 +334,7 @@ namespace FastService.Analyzers
             {
                 if (filterAttr.ConstructorArguments.Length > 0)
                 {
-                    var filterTypes = filterAttr.ConstructorArguments[0].Values;
+                    var filterTypes = filterAttr.ConstructorArguments.FirstOrDefault().Values;
                     foreach (var filter in filterTypes)
                     {
                         if (filter.Value is INamedTypeSymbol filterType)
@@ -341,6 +344,51 @@ namespace FastService.Analyzers
                     }
                 }
             }
+
+
+            
+            // 如果类型有 AuthorizeAttribute，则添加 Authorize，AuthorizeAttribute 有一个 Roles 属性，可以用来指定角色
+            if (classInfo.AuthorizeAttributes.Any())
+            {
+                Debugger.Launch();
+                // 获取 AuthorizeAttribute 的 Roles 属性
+                var roles = classInfo.AuthorizeAttributes
+                    .Select(a => a.NamedArguments.FirstOrDefault(n => n.Key == "Roles").Value)
+                    .FirstOrDefault();
+
+                // 获取 AuthorizeAttribute 的 Policy 属性
+                var policy = classInfo.AuthorizeAttributes
+                    .Select(a => a.NamedArguments.FirstOrDefault(n => n.Key == "Policy").Value)
+                    .FirstOrDefault();
+
+                if (roles.Value is string r && policy.Value is string p)
+                {
+                    sb.AppendLine($".RequireAuthorization(new AuthorizeAttribute()");
+                    sb.AppendLine("{");
+                    sb.AppendLine($"                Roles = \"{r}\",");
+                    sb.AppendLine($"                Policy = \"{p}\"");
+                    sb.AppendLine("            })");
+                }
+                else if (roles.Value is string role)
+                {
+                    sb.AppendLine($".RequireAuthorization(new AuthorizeAttribute()");
+                    sb.AppendLine("{");
+                    sb.AppendLine($"                Roles = \"{role}\"");
+                    sb.AppendLine("            })");
+                }
+                else if (policy.Value is string policyValue)
+                {
+                    sb.AppendLine($".RequireAuthorization(new AuthorizeAttribute()");
+                    sb.AppendLine("{");
+                    sb.AppendLine($"                Policy = \"{policyValue}\"");
+                    sb.AppendLine("            })");
+                }
+                else
+                {
+                    sb.AppendLine($".RequireAuthorization()");
+                }
+            }
+            
 
             // 添加标签
             if (!string.IsNullOrEmpty(classInfo.Tags))
@@ -545,6 +593,9 @@ namespace FastService.Analyzers
             public string ClassName { get; set; } = string.Empty;
             public string Route { get; set; } = string.Empty;
             public string? Tags { get; set; }
+
+            public List<AttributeData> AuthorizeAttributes { get; set; } = new List<AttributeData>();
+
             public List<AttributeData> FilterAttributes { get; set; } = new List<AttributeData>();
             public List<IMethodSymbol> Methods { get; set; } = new List<IMethodSymbol>();
         }

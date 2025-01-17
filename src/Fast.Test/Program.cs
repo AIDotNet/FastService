@@ -1,39 +1,67 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Scalar.AspNetCore;
 
 namespace Fast.Test
 {
-	public class Program
-	{
-		public static void Main(string[] args)
-		{
-			var builder = WebApplication.CreateBuilder(args);
+    public class Program
+    {
+        public static void Main(string[] args)
+        {
+            var builder = WebApplication.CreateBuilder(args);
 
-			// Add services to the container.
-			builder.Services.AddAuthorization();
-			builder.Services.WithFast();
-			// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-			builder.Services.AddOpenApi();
+            // Add services to the container.
+            builder.Services.AddAuthorization();
+            builder.Services.AddAuthentication(options =>
+                {
+                    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+                })
+                .AddJwtBearer(options =>
+                {
+                    options.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        ValidateIssuer = true,
+                        ValidateAudience = true,
+                        ValidateLifetime = true,
+                        ValidateIssuerSigningKey = true,
+                        ValidIssuer = "yourIssuer",
+                        ValidAudience = "yourAudience",
+                        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("yourSecretKey"))
+                    };
+                });
 
-			var app = builder.Build();
+            builder.Services.WithFast();
+            // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+            builder.Services.AddOpenApi();
 
-			// Configure the HTTP request pipeline.
-			if (app.Environment.IsDevelopment())
-			{
-				app.MapScalarApiReference(); // scalar/v1
-				app.MapOpenApi();
-			}
+            var app = builder.Build();
 
-			app.MapFast();
+            // Configure the HTTP request pipeline.
+            if (app.Environment.IsDevelopment())
+            {
+                app.MapScalarApiReference(); // scalar/v1
+                app.MapOpenApi();
+            }
 
-			app.MapGet("test",
-				[EndpointSummary("")]
-			() =>
-				{
+            app.UseAuthentication();
+            app.UseAuthorization();
 
-				});
+            app.MapFast();
 
-			app.Run();
+            app.MapGet("test",
+                [EndpointSummary("")]
+                () =>
+                {
 
-		}
-	}
+                }).RequireAuthorization(new AuthorizeAttribute()
+            {
+                Roles = ""
+            });
+
+            app.Run();
+        }
+    }
 }
