@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version>0.1.2</Version>
+    <Version>0.1.3</Version>
     <Company>AIDotNet</Company>
     <Authors>Token</Authors>
     <Description>简单将Service映射MiniApis，快速简单应用！</Description>
