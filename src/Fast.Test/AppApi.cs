@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 
 namespace Fast.Test
 {
+	[Tags("test")]
 	[Authorize(Roles = "Admin")]
 	public class AppService : FastApi
 	{
