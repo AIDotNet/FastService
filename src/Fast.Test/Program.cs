@@ -14,6 +14,9 @@ namespace Fast.Test
 
             // Add services to the container.
             builder.Services.AddAuthorization();
+            
+            // 注册 FastService APIs
+            builder.Services.AddFastApis();
             builder.Services.AddAuthentication(options =>
                 {
                     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -48,7 +51,16 @@ namespace Fast.Test
             app.UseAuthentication();
             app.UseAuthorization();
 
-            app.MapFastApis();
+            // 测试配置选项
+            app.MapFastApis(options =>
+            {
+                options.Prefix = "api";
+                options.Version = "v1";
+                options.PluralizeServiceName = true;
+                options.AutoAppendId = true;
+                options.DisableTrimMethodPrefix = false;
+                options.EnableProperty = false;
+            });
 
             app.MapGet("test",(string value) => new
             {

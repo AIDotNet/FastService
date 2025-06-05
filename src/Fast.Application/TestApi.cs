@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 namespace Fast.Application
 {
 	[Filter(typeof(TestFilter))]
-	[Route("/api/test1")]
+	[Route("/test1")]
 	[Tags("测试组")]
 	public class TestApi : FastApi
 	{
@@ -22,7 +22,7 @@ namespace Fast.Application
 		/// <param name="input"></param>
 		/// <returns></returns>
 		[EndpointSummary("测试")]
-		public Task CreateDataAsync(TestInput input,string name)
+		public Task CreateDataAsync(TestInput input)
 		{
 			return Task.FromResult("test");
 		}
