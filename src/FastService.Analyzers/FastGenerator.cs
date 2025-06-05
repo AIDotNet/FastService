@@ -715,11 +715,16 @@ namespace FastService.Analyzers
                 {
                     simpleParams.Add($"{param.Type.ToDisplayString()} {param.Name}");
                 }
-                else
+                else if (CanInstantiateType(param.Type))
                 {
-                    // 复杂类型，获取其属性
+                    // 复杂类型且可以实例化，获取其属性
                     var properties = GetPublicProperties(param.Type);
                     complexParams.Add((param, properties));
+                }
+                else
+                {
+                    // 不能实例化的类型（如抽象类、接口等），作为简单参数处理
+                    simpleParams.Add($"{param.Type.ToDisplayString()} {param.Name}");
                 }
             }
             
@@ -821,6 +826,45 @@ namespace FastService.Analyzers
                            p.SetMethod != null &&
                            !p.IsStatic)
                 .ToList();
+        }
+        
+        private static bool CanInstantiateType(ITypeSymbol type)
+        {
+            // 检查是否为接口
+            if (type.TypeKind == TypeKind.Interface)
+                return false;
+                
+            // 检查是否为抽象类
+            if (type.IsAbstract)
+                return false;
+                
+            // 检查是否为静态类
+            if (type.IsStatic)
+                return false;
+                
+            // 检查是否为泛型类型定义（未绑定的泛型类型）
+            if (type is INamedTypeSymbol namedType && namedType.IsUnboundGenericType)
+                return false;
+                
+            // 检查是否有可访问的构造函数
+            if (type is INamedTypeSymbol namedTypeSymbol)
+            {
+                var constructors = namedTypeSymbol.Constructors
+                    .Where(c => c.DeclaredAccessibility == Accessibility.Public)
+                    .ToList();
+                    
+                // 如果没有公共构造函数，检查是否有默认构造函数
+                if (!constructors.Any())
+                {
+                    // 如果类没有显式定义构造函数，编译器会生成默认构造函数
+                    // 但如果类定义了其他构造函数但没有无参构造函数，则不能实例化
+                    var allConstructors = namedTypeSymbol.Constructors.ToList();
+                    if (allConstructors.Any() && !allConstructors.Any(c => c.Parameters.Length == 0))
+                        return false;
+                }
+            }
+                
+            return true;
         }
 
         private (string httpMethod, string route) DetermineHttpMethodAndRoute(IMethodSymbol method)
