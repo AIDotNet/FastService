@@ -707,6 +707,7 @@ namespace FastService.Analyzers
         {
             var simpleParams = new List<string>();
             var complexParams = new List<(IParameterSymbol param, List<IPropertySymbol> properties)>();
+            var diParams = new List<IParameterSymbol>(); // 依赖注入参数
             
             // 分析参数类型
             foreach (var param in parameters)
@@ -715,22 +716,28 @@ namespace FastService.Analyzers
                 {
                     simpleParams.Add($"{param.Type.ToDisplayString()} {param.Name}");
                 }
-                else if (CanInstantiateType(param.Type))
+                else if (CanInstantiate(param.Type))
                 {
-                    // 复杂类型且可以实例化，获取其属性
+                    // 复杂类型但可以实例化，获取其属性
                     var properties = GetPublicProperties(param.Type);
                     complexParams.Add((param, properties));
                 }
                 else
                 {
-                    // 不能实例化的类型（如抽象类、接口等），作为简单参数处理
-                    simpleParams.Add($"{param.Type.ToDisplayString()} {param.Name}");
+                    // 不能实例化的类型（抽象类、接口等），通过依赖注入获取
+                    diParams.Add(param);
                 }
             }
             
             // 构建参数列表
             var allParams = new List<string> { $"{fullTypeName} {serviceInstance}" };
             allParams.AddRange(simpleParams);
+            
+            // 添加依赖注入参数
+            foreach (var param in diParams)
+            {
+                allParams.Add($"{param.Type.ToDisplayString()} {param.Name}");
+            }
             
             // 为复杂类型的每个属性添加参数
             foreach (var (param, properties) in complexParams)
@@ -750,6 +757,12 @@ namespace FastService.Analyzers
             
             // 添加简单参数
             foreach (var param in parameters.Where(p => IsSimpleType(p.Type, compilation)))
+            {
+                callParams.Add(param.Name);
+            }
+            
+            // 添加依赖注入参数（直接使用）
+            foreach (var param in diParams)
             {
                 callParams.Add(param.Name);
             }
@@ -828,42 +841,44 @@ namespace FastService.Analyzers
                 .ToList();
         }
         
-        private static bool CanInstantiateType(ITypeSymbol type)
+        private static bool CanInstantiate(ITypeSymbol type)
         {
             // 检查是否为接口
             if (type.TypeKind == TypeKind.Interface)
                 return false;
-                
+            
             // 检查是否为抽象类
             if (type.IsAbstract)
                 return false;
-                
+            
             // 检查是否为静态类
             if (type.IsStatic)
                 return false;
-                
-            // 检查是否为泛型类型定义（未绑定的泛型类型）
-            if (type is INamedTypeSymbol namedType && namedType.IsUnboundGenericType)
+            
+            // 检查是否为委托类型
+            if (type.TypeKind == TypeKind.Delegate)
                 return false;
-                
+            
+            // 检查是否为枚举（枚举可以实例化，但通常不需要 new）
+            if (type.TypeKind == TypeKind.Enum)
+                return false;
+            
             // 检查是否有可访问的构造函数
-            if (type is INamedTypeSymbol namedTypeSymbol)
+            if (type is INamedTypeSymbol namedType)
             {
-                var constructors = namedTypeSymbol.Constructors
+                var constructors = namedType.Constructors
                     .Where(c => c.DeclaredAccessibility == Accessibility.Public)
                     .ToList();
-                    
-                // 如果没有公共构造函数，检查是否有默认构造函数
-                if (!constructors.Any())
-                {
-                    // 如果类没有显式定义构造函数，编译器会生成默认构造函数
-                    // 但如果类定义了其他构造函数但没有无参构造函数，则不能实例化
-                    var allConstructors = namedTypeSymbol.Constructors.ToList();
-                    if (allConstructors.Any() && !allConstructors.Any(c => c.Parameters.Length == 0))
-                        return false;
-                }
-            }
                 
+                // 如果没有公共构造函数，不能实例化
+                if (!constructors.Any())
+                    return false;
+                
+                // 如果有无参构造函数或者所有参数都有默认值的构造函数，可以实例化
+                return constructors.Any(c => c.Parameters.Length == 0 || 
+                                           c.Parameters.All(p => p.HasExplicitDefaultValue));
+            }
+            
             return true;
         }
 
