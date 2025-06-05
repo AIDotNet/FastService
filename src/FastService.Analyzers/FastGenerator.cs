@@ -18,82 +18,31 @@ namespace FastService.Analyzers
         private const string FastApiBaseTypeName = "FastApi";
         private const string ServiceSuffix = "Service";
         private const string AsyncSuffix = "Async";
-
-        private ImmutableArray<ClassInfo> GetReferencedClasses(Compilation compilation)
+        
+        // 常用的HTTP方法特性名称
+        private static readonly HashSet<string> HttpMethodAttributes = new()
         {
-            var builder = ImmutableArray.CreateBuilder<ClassInfo>();
-
-            foreach (var reference in compilation.References)
-            {
-                var symbol = compilation.GetAssemblyOrModuleSymbol(reference);
-                if (symbol is not IAssemblySymbol assemblySymbol)
-                    continue;
-                
-                // 过滤掉微软的 System 程序集
-                if (assemblySymbol.Name.StartsWith("System", StringComparison.OrdinalIgnoreCase) ||
-                    assemblySymbol.Name.StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                foreach (var type in assemblySymbol.GlobalNamespace.GetNamespaceTypes())
-                {
-                    // 检查类型是否继承自 FastService
-                    if (InheritsFromFastService(type))
-                    {
-                        var classInfo = GetClassInfo(type);
-                        if (classInfo != null)
-                        {
-                            builder.Add(classInfo);
-                        }
-                    }
-                }
-            }
-
-            return builder.ToImmutable();
-        }
-
-        private ClassInfo? GetClassInfo(INamedTypeSymbol classSymbol)
+            "HttpGetAttribute", "HttpPostAttribute", "HttpPutAttribute", 
+            "HttpDeleteAttribute", "HttpPatchAttribute", "HttpHeadAttribute", "HttpOptionsAttribute"
+        };
+        
+        // 需要过滤的系统程序集前缀
+        private static readonly HashSet<string> SystemAssemblyPrefixes = new()
         {
-            var namespaceName = GetFullNamespace(classSymbol.ContainingNamespace);
-            var className = classSymbol.Name;
-            var attributes = classSymbol.GetAttributes();
-            
-            // 获取公共非静态方法
-            var methods = classSymbol.GetMembers()
-                .OfType<IMethodSymbol>()
-                .Where(m => m.DeclaredAccessibility == Accessibility.Public && 
-                            !m.IsStatic &&
-                            m.MethodKind == MethodKind.Ordinary)
-                .ToList();
-
-            // 获取 RouteAttribute
-            var routeAttr = attributes.FirstOrDefault(a => a.AttributeClass?.Name == "RouteAttribute");
-            var route = routeAttr?.ConstructorArguments.FirstOrDefault().Value as string ??
-                      $"/api/{className.TrimEnd(ServiceSuffix)}";
-            // 获取 Tags 属性
-            var tagsAttr = attributes.FirstOrDefault(a => a.AttributeClass?.Name == "TagsAttribute");
-            var tags = tagsAttr?.ConstructorArguments.FirstOrDefault().Values.FirstOrDefault();
-
-            // 获取 FilterAttributes
-            var filterAttributes = attributes.Where(a =>
-                a.AttributeClass?.Name == "FilterAttribute" || a.AttributeClass?.Name == "Filter").ToList();
-
-            // 获取 AuthorizeAttributes
-            var authorizeAttributes = attributes.Where(a => 
-                a.AttributeClass?.Name?.StartsWith("Authorize") == true).ToList();
-
-            return new ClassInfo
-            {
-                Namespace = namespaceName,
-                ClassName = className,
-                Route = route,
-                Tags = tags.Value.Value.ToString(),
-                FilterAttributes = filterAttributes,
-                AuthorizeAttributes = authorizeAttributes,
-                Methods = methods
-            };
-        }
+            "System", "Microsoft.", "mscorlib", "netstandard", "runtime"
+        };
+        
+        // MVC HTTP方法特性映射
+        private static readonly Dictionary<string, string> MvcHttpMethodAttributes = new()
+        {
+            { "HttpGetAttribute", "Get" },
+            { "HttpPostAttribute", "Post" },
+            { "HttpPutAttribute", "Put" },
+            { "HttpDeleteAttribute", "Delete" },
+            { "HttpPatchAttribute", "Patch" },
+            { "HttpHeadAttribute", "Head" },
+            { "HttpOptionsAttribute", "Options" }
+        };
 
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
@@ -127,7 +76,7 @@ namespace FastService.Analyzers
 
         private static bool IsCandidateClass(SyntaxNode node, CancellationToken _)
         {
-            return node is ClassDeclarationSyntax c && c.BaseList != null;
+            return node is ClassDeclarationSyntax { BaseList: not null };
         }
 
         private static ClassInfo? GetSemanticTargetForGeneration(GeneratorSyntaxContext context,
@@ -137,53 +86,132 @@ namespace FastService.Analyzers
             var model = context.SemanticModel;
 
             // 获取类的符号信息
-            if (model.GetDeclaredSymbol(classDeclaration) is not INamedTypeSymbol classSymbol)
+            if (model.GetDeclaredSymbol(classDeclaration, cancellationToken) is not INamedTypeSymbol classSymbol)
                 return null;
 
             // 检查类是否继承自 FastService
             if (!InheritsFromFastService(classSymbol))
                 return null;
 
-            // 获取命名空间
+            return CreateClassInfo(classSymbol);
+        }
+
+        private ImmutableArray<ClassInfo> GetReferencedClasses(Compilation compilation)
+        {
+            var builder = ImmutableArray.CreateBuilder<ClassInfo>();
+
+            foreach (var reference in compilation.References)
+            {
+                if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assemblySymbol)
+                    continue;
+                
+                // 过滤掉系统程序集
+                if (IsSystemAssembly(assemblySymbol.Name))
+                    continue;
+
+                foreach (var type in assemblySymbol.GlobalNamespace.GetNamespaceTypes())
+                {
+                    // 检查类型是否继承自 FastService
+                    if (InheritsFromFastService(type))
+                    {
+                        var classInfo = CreateClassInfo(type);
+                        if (classInfo != null)
+                        {
+                            builder.Add(classInfo);
+                        }
+                    }
+                }
+            }
+
+            return builder.ToImmutable();
+        }
+
+        private static bool IsSystemAssembly(string assemblyName)
+        {
+            return SystemAssemblyPrefixes.Any(prefix => 
+                assemblyName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// 查找特性，优先查找 FastService 命名空间，然后回退到 Microsoft.AspNetCore.Mvc
+        /// </summary>
+        private static AttributeData? FindAttribute(ImmutableArray<AttributeData> attributes, string attributeName)
+        {
+            // 优先查找 FastService 命名空间的特性
+            var fastServiceAttr = attributes.FirstOrDefault(a => 
+                a.AttributeClass?.Name == attributeName && 
+                a.AttributeClass?.ContainingNamespace?.ToDisplayString() == "FastService");
+            
+            if (fastServiceAttr != null)
+                return fastServiceAttr;
+            
+            // 回退到 Microsoft.AspNetCore.Mvc 命名空间
+            return attributes.FirstOrDefault(a => 
+                a.AttributeClass?.Name == attributeName && 
+                a.AttributeClass?.ContainingNamespace?.ToDisplayString() == "Microsoft.AspNetCore.Mvc");
+        }
+
+        private static ClassInfo? CreateClassInfo(INamedTypeSymbol classSymbol)
+        {
             var namespaceName = GetFullNamespace(classSymbol.ContainingNamespace);
-
-            // 获取类名
             var className = classSymbol.Name;
-
-            // 获取类级别的特性
             var attributes = classSymbol.GetAttributes();
-
-            // 获取 RouteAttribute
-            var routeAttr = attributes.FirstOrDefault(a => a.AttributeClass?.Name == "RouteAttribute");
-            var route = routeAttr?.ConstructorArguments.FirstOrDefault().Value as string ??
-                        $"/api/{className.TrimEnd(ServiceSuffix)}";
-                        
-            // 获取 Tags 属性
-            var tagsAttr = attributes.FirstOrDefault(a => a.AttributeClass?.Name == "Tags");
-            var tags = tagsAttr?.ConstructorArguments.FirstOrDefault().Value as string;
-
-            // 获取 FilterAttributes
-            var filterAttributes = attributes.Where(a =>
-                a.AttributeClass?.Name == "FilterAttribute" || a.AttributeClass?.Name == "Filter").ToList();
-
-            var authorizeAttributes = attributes.Where(a => 
-                a.AttributeClass?.Name?.StartsWith("Authorize") == true).ToList();
-
-            // 获取所有公共非静态方法
-            var methods = classSymbol.GetMembers().OfType<IMethodSymbol>()
+            
+            // 获取公共非静态方法
+            var methods = classSymbol.GetMembers()
+                .OfType<IMethodSymbol>()
                 .Where(m => m.DeclaredAccessibility == Accessibility.Public && 
-                           !m.IsStatic &&
-                           m.MethodKind == MethodKind.Ordinary)
+                            !m.IsStatic &&
+                            m.MethodKind == MethodKind.Ordinary &&
+                            !m.IsImplicitlyDeclared)
                 .ToList();
+
+            // 获取 RouteAttribute (优先使用 FastService.RouteAttribute，回退到 Microsoft.AspNetCore.Mvc.RouteAttribute)
+            var routeAttr = FindAttribute(attributes, "RouteAttribute");
+            var route = routeAttr?.ConstructorArguments.FirstOrDefault().Value as string ??
+                      $"/api/{className.TrimEnd(ServiceSuffix).ToLowerInvariant()}";
+            
+            // 获取 Tags 属性 (使用 Microsoft.AspNetCore.Http.TagsAttribute)
+            var tagsAttr = attributes.FirstOrDefault(a => 
+                a.AttributeClass?.Name == "TagsAttribute" && 
+                a.AttributeClass?.ContainingNamespace?.ToDisplayString() == "Microsoft.AspNetCore.Http");
+            string? tags = null;
+            if (tagsAttr != null && tagsAttr.ConstructorArguments.Length > 0)
+            {
+                // Microsoft.AspNetCore.Http.TagsAttribute 接受 params string[] 参数
+                var firstArg = tagsAttr.ConstructorArguments[0];
+                if (firstArg.Kind == TypedConstantKind.Array)
+                {
+                    var tagValues = firstArg.Values;
+                    if (tagValues.Length > 0)
+                    {
+                        var tagList = tagValues.Select(v => v.Value?.ToString()).Where(v => !string.IsNullOrEmpty(v));
+                        tags = string.Join(", ", tagList);
+                    }
+                }
+                else if (firstArg.Value is string singleTag)
+                {
+                    tags = singleTag;
+                }
+            }
+
+            // 获取 FilterAttributes (使用 FastService.FilterAttribute)
+            var filterAttributes = attributes.Where(a =>
+                a.AttributeClass?.Name == "FilterAttribute" && 
+                a.AttributeClass?.ContainingNamespace?.ToDisplayString() == "FastService").ToList();
+
+            // 获取 AuthorizeAttributes
+            var authorizeAttributes = attributes.Where(a => 
+                a.AttributeClass?.Name?.StartsWith("Authorize", StringComparison.OrdinalIgnoreCase) == true).ToList();
 
             return new ClassInfo
             {
                 Namespace = namespaceName,
                 ClassName = className,
                 Route = route,
-                AuthorizeAttributes = authorizeAttributes,
                 Tags = tags,
                 FilterAttributes = filterAttributes,
+                AuthorizeAttributes = authorizeAttributes,
                 Methods = methods
             };
         }
@@ -201,7 +229,7 @@ namespace FastService.Analyzers
             return false;
         }
 
-        private static string GetFullNamespace(INamespaceSymbol namespaceSymbol)
+        private static string GetFullNamespace(INamespaceSymbol? namespaceSymbol)
         {
             if (namespaceSymbol == null || namespaceSymbol.IsGlobalNamespace)
                 return string.Empty;
@@ -225,40 +253,126 @@ namespace FastService.Analyzers
             if (!classInfos.Any())
                 return;
 
+            // 生成主扩展文件（包含 DI 注册和总的映射方法）
+            GenerateMainExtensionsFile(context, classInfos);
+
+            // 为每个类生成单独的扩展文件
+            foreach (var classInfo in classInfos)
+            {
+                GenerateIndividualExtensionFile(context, classInfo, compilation, context.CancellationToken);
+            }
+        }
+
+        private void GenerateMainExtensionsFile(SourceProductionContext context, List<ClassInfo> classInfos)
+        {
             // 生成 DI 注册代码
             var diRegistration = GenerateDiRegistration(classInfos);
 
-            // 生成 API 映射代码
-            var apiMappings = GenerateApiMappings(classInfos, compilation, context.CancellationToken);
-
-            // 构建最终的源代码
+            // 构建主扩展文件的源代码
             var sourceBuilder = new StringBuilder();
-            sourceBuilder.AppendLine("// 这是由FastService自动生成的");
+            sourceBuilder.AppendLine("// <auto-generated />");
+            sourceBuilder.AppendLine("// This code was generated by FastService Source Generator");
+            sourceBuilder.AppendLine("#nullable enable");
+            sourceBuilder.AppendLine();
             sourceBuilder.AppendLine("using Microsoft.AspNetCore.Builder;");
             sourceBuilder.AppendLine("using Microsoft.Extensions.DependencyInjection;");
-            sourceBuilder.AppendLine("using Microsoft.AspNetCore.Authorization;");
             sourceBuilder.AppendLine();
             sourceBuilder.AppendLine("namespace Microsoft.Extensions.DependencyInjection");
             sourceBuilder.AppendLine("{");
-            sourceBuilder.AppendLine("    public static class FastExtensions");
+            sourceBuilder.AppendLine("    /// <summary>");
+            sourceBuilder.AppendLine("    /// FastService extension methods for dependency injection and API mapping");
+            sourceBuilder.AppendLine("    /// </summary>");
+            sourceBuilder.AppendLine("    public static partial class FastExtensions");
             sourceBuilder.AppendLine("    {");
+            sourceBuilder.AppendLine("        /// <summary>");
+            sourceBuilder.AppendLine("        /// Register all FastService classes with the specified service lifetime");
+            sourceBuilder.AppendLine("        /// </summary>");
+            sourceBuilder.AppendLine("        /// <param name=\"services\">The service collection</param>");
+            sourceBuilder.AppendLine("        /// <param name=\"lifetime\">The service lifetime (default: Scoped)</param>");
+            sourceBuilder.AppendLine("        /// <returns>The service collection for chaining</returns>");
             sourceBuilder.AppendLine(
-                "        public static IServiceCollection WithFast(this IServiceCollection services, ServiceLifetime lifetime = ServiceLifetime.Scoped)");
+                "        public static IServiceCollection AddFastApis(this IServiceCollection services, ServiceLifetime lifetime = ServiceLifetime.Scoped)");
             sourceBuilder.AppendLine("        {");
             sourceBuilder.AppendLine(diRegistration);
             sourceBuilder.AppendLine("            return services;");
             sourceBuilder.AppendLine("        }");
             sourceBuilder.AppendLine();
-            sourceBuilder.AppendLine("        public static WebApplication MapFast(this WebApplication app)");
+            sourceBuilder.AppendLine("        /// <summary>");
+            sourceBuilder.AppendLine("        /// Map all FastService endpoints to the web application");
+            sourceBuilder.AppendLine("        /// </summary>");
+            sourceBuilder.AppendLine("        /// <param name=\"webApplication\">The web application</param>");
+            sourceBuilder.AppendLine("        /// <returns>The web application for chaining</returns>");
+            sourceBuilder.AppendLine("        public static WebApplication MapFastApis(this WebApplication webApplication)");
             sourceBuilder.AppendLine("        {");
-            sourceBuilder.AppendLine(apiMappings);
-            sourceBuilder.AppendLine("            return app;");
+            foreach (var classInfo in classInfos.OrderBy(c => c.Namespace).ThenBy(c => c.ClassName))
+            {
+                var methodName = GenerateMapMethodName(classInfo.ClassName);
+                sourceBuilder.AppendLine($"            webApplication.Map{methodName}();");
+            }
+            sourceBuilder.AppendLine("            return webApplication;");
             sourceBuilder.AppendLine("        }");
             sourceBuilder.AppendLine("    }");
             sourceBuilder.AppendLine("}");
 
-            // 添加生成的源代码
+            // 添加主扩展文件
             context.AddSource("FastExtensions.g.cs", SourceText.From(sourceBuilder.ToString(), Encoding.UTF8));
+        }
+
+        private void GenerateIndividualExtensionFile(SourceProductionContext context, ClassInfo classInfo, 
+            Compilation compilation, CancellationToken cancellationToken)
+        {
+            var methodName = GenerateMapMethodName(classInfo.ClassName);
+            var instanceName = GenerateInstanceName(classInfo.ClassName);
+            var fileName = $"FastExtensions.{methodName}.g.cs";
+
+            var sourceBuilder = new StringBuilder();
+            sourceBuilder.AppendLine("// <auto-generated />");
+            sourceBuilder.AppendLine($"// This code was generated by FastService Source Generator for {classInfo.ClassName}");
+            sourceBuilder.AppendLine("#nullable enable");
+            sourceBuilder.AppendLine();
+            sourceBuilder.AppendLine("using Microsoft.AspNetCore.Builder;");
+            sourceBuilder.AppendLine("using Microsoft.Extensions.DependencyInjection;");
+            sourceBuilder.AppendLine("using Microsoft.AspNetCore.Authorization;");
+            
+            // 添加类所在的命名空间引用
+            if (!string.IsNullOrEmpty(classInfo.Namespace))
+            {
+                sourceBuilder.AppendLine($"using {classInfo.Namespace};");
+            }
+            
+            sourceBuilder.AppendLine();
+            sourceBuilder.AppendLine("namespace Microsoft.Extensions.DependencyInjection");
+            sourceBuilder.AppendLine("{");
+            sourceBuilder.AppendLine("    /// <summary>");
+            sourceBuilder.AppendLine($"    /// FastService extension methods for {classInfo.ClassName}");
+            sourceBuilder.AppendLine("    /// </summary>");
+            sourceBuilder.AppendLine("    public static partial class FastExtensions");
+            sourceBuilder.AppendLine("    {");
+            sourceBuilder.AppendLine("        /// <summary>");
+            sourceBuilder.AppendLine($"        /// Map {classInfo.ClassName} endpoints to the web application");
+            sourceBuilder.AppendLine("        /// </summary>");
+            sourceBuilder.AppendLine("        /// <param name=\"webApplication\">The web application</param>");
+            sourceBuilder.AppendLine("        /// <returns>The web application for chaining</returns>");
+            sourceBuilder.AppendLine($"        public static WebApplication Map{methodName}(this WebApplication webApplication)");
+            sourceBuilder.AppendLine("        {");
+            
+            sourceBuilder.AppendLine(
+                $"            var {instanceName} = webApplication.MapGroup(\"{classInfo.Route}\"){GenerateClassAttributes(classInfo)};");
+
+            foreach (var method in classInfo.Methods.OrderBy(m => m.Name))
+            {
+                var methodCode = GenerateMethodMapping(method, classInfo, compilation, instanceName, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(methodCode))
+                    sourceBuilder.AppendLine(methodCode);
+            }
+
+            sourceBuilder.AppendLine("            return webApplication;");
+            sourceBuilder.AppendLine("        }");
+            sourceBuilder.AppendLine("    }");
+            sourceBuilder.AppendLine("}");
+
+            // 添加单独的扩展文件
+            context.AddSource(fileName, SourceText.From(sourceBuilder.ToString(), Encoding.UTF8));
         }
 
         private static string GenerateDiRegistration(List<ClassInfo> classInfos)
@@ -266,10 +380,14 @@ namespace FastService.Analyzers
             var sb = new StringBuilder();
             
             // 将类信息按命名空间分组
-            var classInfosByNamespace = classInfos.GroupBy(c => c.Namespace);
+            var classInfosByNamespace = classInfos
+                .GroupBy(c => c.Namespace)
+                .OrderBy(g => g.Key);
             
             sb.AppendLine("            switch (lifetime)");
             sb.AppendLine("            {");
+            
+            // Singleton
             sb.AppendLine("                case ServiceLifetime.Singleton:");
             foreach (var group in classInfosByNamespace)
             {
@@ -278,13 +396,17 @@ namespace FastService.Analyzers
                     sb.AppendLine($"                    // {group.Key}");
                 }
                 
-                foreach (var classInfo in group)
+                foreach (var classInfo in group.OrderBy(c => c.ClassName))
                 {
-                    sb.AppendLine($"                    services.AddSingleton<{classInfo.Namespace}.{classInfo.ClassName}>();");
+                    var fullTypeName = string.IsNullOrEmpty(classInfo.Namespace) 
+                        ? classInfo.ClassName 
+                        : $"{classInfo.Namespace}.{classInfo.ClassName}";
+                    sb.AppendLine($"                    services.AddSingleton<{fullTypeName}>();");
                 }
             }
             sb.AppendLine("                    break;");
             
+            // Scoped
             sb.AppendLine("                case ServiceLifetime.Scoped:");
             foreach (var group in classInfosByNamespace)
             {
@@ -293,13 +415,17 @@ namespace FastService.Analyzers
                     sb.AppendLine($"                    // {group.Key}");
                 }
                 
-                foreach (var classInfo in group)
+                foreach (var classInfo in group.OrderBy(c => c.ClassName))
                 {
-                    sb.AppendLine($"                    services.AddScoped<{classInfo.Namespace}.{classInfo.ClassName}>();");
+                    var fullTypeName = string.IsNullOrEmpty(classInfo.Namespace) 
+                        ? classInfo.ClassName 
+                        : $"{classInfo.Namespace}.{classInfo.ClassName}";
+                    sb.AppendLine($"                    services.AddScoped<{fullTypeName}>();");
                 }
             }
             sb.AppendLine("                    break;");
             
+            // Transient
             sb.AppendLine("                case ServiceLifetime.Transient:");
             foreach (var group in classInfosByNamespace)
             {
@@ -308,9 +434,12 @@ namespace FastService.Analyzers
                     sb.AppendLine($"                    // {group.Key}");
                 }
                 
-                foreach (var classInfo in group)
+                foreach (var classInfo in group.OrderBy(c => c.ClassName))
                 {
-                    sb.AppendLine($"                    services.AddTransient<{classInfo.Namespace}.{classInfo.ClassName}>();");
+                    var fullTypeName = string.IsNullOrEmpty(classInfo.Namespace) 
+                        ? classInfo.ClassName 
+                        : $"{classInfo.Namespace}.{classInfo.ClassName}";
+                    sb.AppendLine($"                    services.AddTransient<{fullTypeName}>();");
                 }
             }
             sb.AppendLine("                    break;");
@@ -320,41 +449,18 @@ namespace FastService.Analyzers
             return sb.ToString();
         }
 
-        private string GenerateApiMappings(List<ClassInfo> classInfos, Compilation compilation,
-            CancellationToken cancellationToken)
+
+
+        private static string GenerateMapMethodName(string className)
         {
-            var sb = new StringBuilder();
-            
-            // 按命名空间分组
-            var classInfosByNamespace = classInfos.GroupBy(c => c.Namespace);
-            
-            foreach (var group in classInfosByNamespace)
-            {
-                if (!string.IsNullOrEmpty(group.Key))
-                {
-                    sb.AppendLine($"            // {group.Key}");
-                }
-                
-                foreach (var classInfo in group)
-                {
-                    var instanceName = char.ToLowerInvariant(classInfo.ClassName[0]) +
-                                     classInfo.ClassName.TrimEnd(ServiceSuffix);
+            var baseName = className.TrimEnd(ServiceSuffix);
+            return baseName;
+        }
 
-                    sb.AppendLine(
-                        $"            var {instanceName} = app.MapGroup(\"{classInfo.Route}\"){GenerateClassAttributes(classInfo)};");
-
-                    foreach (var method in classInfo.Methods)
-                    {
-                        var methodCode = GenerateMethodMapping(method, classInfo, compilation, instanceName, cancellationToken);
-                        if (!string.IsNullOrWhiteSpace(methodCode))
-                            sb.AppendLine(methodCode);
-                    }
-
-                    sb.AppendLine();
-                }
-            }
-
-            return sb.ToString();
+        private static string GenerateInstanceName(string className)
+        {
+            var baseName = className.TrimEnd(ServiceSuffix);
+            return char.ToLowerInvariant(baseName[0]) + baseName.Substring(1);
         }
 
         private string GenerateClassAttributes(ClassInfo classInfo)
@@ -371,7 +477,7 @@ namespace FastService.Analyzers
                     {
                         if (filter.Value is INamedTypeSymbol filterType)
                         {
-                            sb.AppendLine($".AddEndpointFilter<{filterType.ToDisplayString()}>()");
+                            sb.Append($".AddEndpointFilter<{filterType.ToDisplayString()}>()");
                         }
                     }
                 }
@@ -380,69 +486,70 @@ namespace FastService.Analyzers
             // 处理授权属性
             if (classInfo.AuthorizeAttributes.Any())
             {
-                // 获取 AuthorizeAttribute 的 Roles 属性
-                var rolesArg = classInfo.AuthorizeAttributes
-                    .SelectMany(a => a.NamedArguments)
-                    .FirstOrDefault(n => n.Key == "Roles");
-                
-                // 获取 AuthorizeAttribute 的 Policy 属性
-                var policyArg = classInfo.AuthorizeAttributes
-                    .SelectMany(a => a.NamedArguments)
-                    .FirstOrDefault(n => n.Key == "Policy");
-
-                if (!rolesArg.Equals(default) && !policyArg.Equals(default) && 
-                    rolesArg.Value.Value is string roles && policyArg.Value.Value is string policy)
+                var authorizationCode = GenerateAuthorizationCode(classInfo.AuthorizeAttributes);
+                if (!string.IsNullOrEmpty(authorizationCode))
                 {
-                    sb.AppendLine($".RequireAuthorization(p => p.RequireRole(\"{roles}\").RequirePolicy(\"{policy}\"))");
-                }
-                else if (!rolesArg.Equals(default) && rolesArg.Value.Value is string role)
-                {
-                    sb.AppendLine($".RequireAuthorization(p => p.RequireRole(\"{role}\"))");
-                }
-                else if (!policyArg.Equals(default) && policyArg.Value.Value is string policyValue)
-                {
-                    sb.AppendLine($".RequireAuthorization(\"{policyValue}\")");
-                }
-                else
-                {
-                    sb.AppendLine(".RequireAuthorization()");
+                    sb.Append(authorizationCode);
                 }
             }
 
             // 添加标签
             if (!string.IsNullOrEmpty(classInfo.Tags))
             {
-                sb.AppendLine($".WithTags(\"{classInfo.Tags}\")");
+                sb.Append($".WithTags(\"{classInfo.Tags}\")");
             }
 
             return sb.ToString();
+        }
+
+        private static string GenerateAuthorizationCode(List<AttributeData> authorizeAttributes)
+        {
+            // 获取 AuthorizeAttribute 的 Roles 属性
+            var rolesArg = authorizeAttributes
+                .SelectMany(a => a.NamedArguments)
+                .FirstOrDefault(n => n.Key == "Roles");
+            
+            // 获取 AuthorizeAttribute 的 Policy 属性
+            var policyArg = authorizeAttributes
+                .SelectMany(a => a.NamedArguments)
+                .FirstOrDefault(n => n.Key == "Policy");
+
+            if (!rolesArg.Equals(default) && !policyArg.Equals(default) && 
+                rolesArg.Value.Value is string roles && policyArg.Value.Value is string policy)
+            {
+                return $".RequireAuthorization(p => p.RequireRole(\"{roles}\").RequirePolicy(\"{policy}\"))";
+            }
+            
+            if (!rolesArg.Equals(default) && rolesArg.Value.Value is string role)
+            {
+                return $".RequireAuthorization(p => p.RequireRole(\"{role}\"))";
+            }
+            
+            if (!policyArg.Equals(default) && policyArg.Value.Value is string policyValue)
+            {
+                return $".RequireAuthorization(\"{policyValue}\")";
+            }
+            
+            return ".RequireAuthorization()";
         }
 
         private string GenerateMethodMapping(IMethodSymbol method, ClassInfo classInfo, Compilation compilation,
             string instanceName, CancellationToken cancellationToken)
         {
             // 跳过具有 IgnoreRouteAttribute 的方法
-            if (method.GetAttributes().Any(a => a.AttributeClass?.Name == "IgnoreRouteAttribute"))
+            if (method.GetAttributes().Any(a => 
+                a.AttributeClass?.Name == "IgnoreRouteAttribute" && 
+                a.AttributeClass?.ContainingNamespace?.ToDisplayString() == "FastService"))
                 return string.Empty;
 
             // 确定 HTTP 方法和路由
             var (httpMethod, route) = DetermineHttpMethodAndRoute(method);
 
-            // 获取方法级别的属性，排除 FilterAttribute
-            var methodAttributes =
-                method.GetAttributes().Where(a => a.AttributeClass?.Name != "FilterAttribute").ToList();
-
-            // 构建属性字符串
-            var attributesString = string.Join("\n", methodAttributes.Select(a => $"                [{a}]"));
-
-            if (!string.IsNullOrEmpty(attributesString))
-            {
-                attributesString = "\n" + attributesString;
-            }
-
             // 获取方法级别的过滤器
-            var filterAttributes =
-                method.GetAttributes().Where(a => a.AttributeClass?.Name == "FilterAttribute").ToList();
+            var filterAttributes = method.GetAttributes()
+                .Where(a => a.AttributeClass?.Name == "FilterAttribute" && 
+                           a.AttributeClass?.ContainingNamespace?.ToDisplayString() == "FastService")
+                .ToList();
                 
             var filterExtensions = new StringBuilder();
             foreach (var filterAttr in filterAttributes)
@@ -463,24 +570,51 @@ namespace FastService.Analyzers
 
             // 获取方法参数
             var parameters = method.Parameters;
-            var parameterList = string.Join(", ", parameters.Select(p => $"{p.Type.ToDisplayString()} {p.Name}"));
-            var parameterNames = string.Join(", ", parameters.Select(p => p.Name));
-
+            
             // 确定服务实例名称
-            var serviceInstance = char.ToLowerInvariant(classInfo.ClassName[0]) + 
-                                classInfo.ClassName.TrimEnd(ServiceSuffix);
+            var serviceInstance = GenerateInstanceName(classInfo.ClassName);
 
             // 构建 Lambda 表达式
+            var fullTypeName = string.IsNullOrEmpty(classInfo.Namespace) 
+                ? classInfo.ClassName 
+                : $"{classInfo.Namespace}.{classInfo.ClassName}";
+
             string lambda;
-            if (parameters.Length > 0)
+            
+            // 检查是否是 GET 请求且有复杂类型参数
+            if (httpMethod == "Get" && parameters.Length > 0)
             {
-                lambda =
-                    $"async ({classInfo.Namespace}.{classInfo.ClassName} {serviceInstance}, {parameterList}) => await {serviceInstance}.{method.Name}({parameterNames})";
+                lambda = GenerateGetMethodLambda(parameters, fullTypeName, serviceInstance, method.Name, compilation);
             }
             else
             {
-                lambda =
-                    $"async ({classInfo.Namespace}.{classInfo.ClassName} {serviceInstance}) => await {serviceInstance}.{method.Name}()";
+                // 非 GET 请求或无参数的常规处理
+                var parameterList = string.Join(", ", parameters.Select(p => $"{p.Type.ToDisplayString()} {p.Name}"));
+                var parameterNames = string.Join(", ", parameters.Select(p => p.Name));
+                
+                if (parameters.Length > 0)
+                {
+                    lambda = $"async ({fullTypeName} {serviceInstance}, {parameterList}) => await {serviceInstance}.{method.Name}({parameterNames})";
+                }
+                else
+                {
+                    lambda = $"async ({fullTypeName} {serviceInstance}) => await {serviceInstance}.{method.Name}()";
+                }
+            }
+
+            // 获取方法级别的其他属性（排除 FilterAttribute 和 HTTP 方法特性）
+            var otherAttributes = method.GetAttributes()
+                .Where(a => !(a.AttributeClass?.Name == "FilterAttribute" && 
+                             a.AttributeClass?.ContainingNamespace?.ToDisplayString() == "FastService") && 
+                           !(HttpMethodAttributes.Contains(a.AttributeClass?.Name ?? "") &&
+                             a.AttributeClass?.ContainingNamespace?.ToDisplayString() == "Microsoft.AspNetCore.Mvc"))
+                .ToList();
+
+            var attributesString = string.Empty;
+            if (otherAttributes.Any())
+            {
+                var attributeStrings = otherAttributes.Select(a => $"                [{a}]");
+                attributesString = "\n" + string.Join("\n", attributeStrings);
             }
 
             // 组合所有部分生成方法代码
@@ -490,122 +624,274 @@ namespace FastService.Analyzers
             return methodCode;
         }
 
+        private string GenerateGetMethodLambda(ImmutableArray<IParameterSymbol> parameters, string fullTypeName, 
+            string serviceInstance, string methodName, Compilation compilation)
+        {
+            var simpleParams = new List<string>();
+            var complexParams = new List<(IParameterSymbol param, List<IPropertySymbol> properties)>();
+            
+            // 分析参数类型
+            foreach (var param in parameters)
+            {
+                if (IsSimpleType(param.Type, compilation))
+                {
+                    simpleParams.Add($"{param.Type.ToDisplayString()} {param.Name}");
+                }
+                else
+                {
+                    // 复杂类型，获取其属性
+                    var properties = GetPublicProperties(param.Type);
+                    complexParams.Add((param, properties));
+                }
+            }
+            
+            // 构建参数列表
+            var allParams = new List<string> { $"{fullTypeName} {serviceInstance}" };
+            allParams.AddRange(simpleParams);
+            
+            // 为复杂类型的每个属性添加参数
+            foreach (var (param, properties) in complexParams)
+            {
+                foreach (var prop in properties)
+                {
+                    // 直接使用属性名称作为参数名称，首字母小写
+                    var paramName = char.ToLowerInvariant(prop.Name[0]) + prop.Name.Substring(1);
+                    allParams.Add($"{prop.Type.ToDisplayString()} {paramName}");
+                }
+            }
+            
+            var parameterList = string.Join(", ", allParams);
+            
+            // 构建方法调用参数
+            var callParams = new List<string>();
+            
+            // 添加简单参数
+            foreach (var param in parameters.Where(p => IsSimpleType(p.Type, compilation)))
+            {
+                callParams.Add(param.Name);
+            }
+            
+            // 为复杂参数创建实例
+            foreach (var (param, properties) in complexParams)
+            {
+                var propAssignments = properties.Select(prop => 
+                {
+                    // 使用属性名称作为参数名称，首字母小写
+                    var paramName = char.ToLowerInvariant(prop.Name[0]) + prop.Name.Substring(1);
+                    return $"{prop.Name} = {paramName}";
+                }).ToList();
+                
+                var paramTypeName = param.Type.ToDisplayString();
+                var newInstance = $"new {paramTypeName} {{ {string.Join(", ", propAssignments)} }}";
+                callParams.Add(newInstance);
+            }
+            
+            var methodCall = callParams.Any() 
+                ? $"await {serviceInstance}.{methodName}({string.Join(", ", callParams)})"
+                : $"await {serviceInstance}.{methodName}()";
+            
+            return $"async ({parameterList}) => {methodCall}";
+        }
+        
+        private static bool IsSimpleType(ITypeSymbol type, Compilation compilation)
+        {
+            // 检查是否为简单类型（基础类型、字符串、DateTime 等）
+            switch (type.SpecialType)
+            {
+                case SpecialType.System_Boolean:
+                case SpecialType.System_Byte:
+                case SpecialType.System_SByte:
+                case SpecialType.System_Int16:
+                case SpecialType.System_UInt16:
+                case SpecialType.System_Int32:
+                case SpecialType.System_UInt32:
+                case SpecialType.System_Int64:
+                case SpecialType.System_UInt64:
+                case SpecialType.System_Decimal:
+                case SpecialType.System_Single:
+                case SpecialType.System_Double:
+                case SpecialType.System_Char:
+                case SpecialType.System_String:
+                    return true;
+            }
+            
+            // 检查可空类型
+            if (type is INamedTypeSymbol namedType && namedType.IsGenericType)
+            {
+                var genericTypeDef = namedType.ConstructedFrom;
+                if (genericTypeDef.SpecialType == SpecialType.System_Nullable_T)
+                {
+                    return IsSimpleType(namedType.TypeArguments[0], compilation);
+                }
+            }
+            
+            // 检查常见的简单类型
+            var typeName = type.ToDisplayString();
+            return typeName == "System.DateTime" || 
+                   typeName == "System.DateTimeOffset" ||
+                   typeName == "System.TimeSpan" ||
+                   typeName == "System.Guid" ||
+                   typeName == "System.Uri";
+        }
+        
+        private static List<IPropertySymbol> GetPublicProperties(ITypeSymbol type)
+        {
+            return type.GetMembers()
+                .OfType<IPropertySymbol>()
+                .Where(p => p.DeclaredAccessibility == Accessibility.Public && 
+                           p.GetMethod != null && 
+                           p.SetMethod != null &&
+                           !p.IsStatic)
+                .ToList();
+        }
+
         private (string httpMethod, string route) DetermineHttpMethodAndRoute(IMethodSymbol method)
         {
-            // 检查是否有 HTTP 方法特性
-            var httpMethodAttr = method.GetAttributes().FirstOrDefault(a => a.AttributeClass != null &&
-                                                                           (a.AttributeClass.Name == "HttpGetAttribute" ||
-                                                                            a.AttributeClass.Name == "HttpPostAttribute" ||
-                                                                            a.AttributeClass.Name == "HttpPutAttribute" ||
-                                                                            a.AttributeClass.Name == "HttpDeleteAttribute"));
+            // 检查是否有 HTTP 方法特性 (支持 Microsoft.AspNetCore.Mvc 命名空间)
+            var httpMethodAttr = method.GetAttributes().FirstOrDefault(a => 
+                a.AttributeClass != null && 
+                HttpMethodAttributes.Contains(a.AttributeClass.Name) &&
+                a.AttributeClass.ContainingNamespace?.ToDisplayString() == "Microsoft.AspNetCore.Mvc");
 
             if (httpMethodAttr != null)
             {
-                var attrName = httpMethodAttr.AttributeClass.Name;
-                string httpMethod = attrName switch
+                var attrName = httpMethodAttr.AttributeClass!.Name;
+                if (MvcHttpMethodAttributes.TryGetValue(attrName, out var httpMethod))
                 {
-                    "HttpGetAttribute" => "Get",
-                    "HttpPostAttribute" => "Post",
-                    "HttpPutAttribute" => "Put",
-                    "HttpDeleteAttribute" => "Delete",
-                    _ => "Post"
-                };
+                    // 获取路由参数，如果有
+                    var route = httpMethodAttr.ConstructorArguments.FirstOrDefault().Value as string ?? 
+                               NormalizeMethodName(method.Name);
 
-                // 获取路由参数，如果有
-                var route = httpMethodAttr.ConstructorArguments.FirstOrDefault().Value as string ?? method.Name;
-
-                return (httpMethod, route);
+                    return (httpMethod, route);
+                }
             }
 
             // 根据方法名推断 HTTP 方法和路由
-            var methodName = method.Name;
-            string inferredHttpMethod;
-            string inferredRoute;
+            return InferHttpMethodFromName(method.Name);
+        }
 
-            if (methodName.StartsWith("Get", StringComparison.OrdinalIgnoreCase))
+        private static (string httpMethod, string route) InferHttpMethodFromName(string methodName)
+        {
+            // 先移除 Async 和 Service 后缀，但不添加 / 前缀
+            var cleanName = methodName;
+            if (cleanName.EndsWith(AsyncSuffix, StringComparison.OrdinalIgnoreCase))
             {
-                inferredHttpMethod = "Get";
-                inferredRoute = methodName.Substring(3);
+                cleanName = cleanName.Substring(0, cleanName.Length - AsyncSuffix.Length);
             }
-            else if (methodName.StartsWith("Remove", StringComparison.OrdinalIgnoreCase))
+            if (cleanName.EndsWith(ServiceSuffix, StringComparison.OrdinalIgnoreCase))
             {
-                inferredHttpMethod = "Delete";
-                inferredRoute = methodName.Substring(6);
+                cleanName = cleanName.Substring(0, cleanName.Length - ServiceSuffix.Length);
             }
-            else if (methodName.StartsWith("Delete", StringComparison.OrdinalIgnoreCase))
+            
+            var lowerName = cleanName.ToLowerInvariant();
+            string routePart;
+            string httpMethod;
+            
+            if (lowerName.StartsWith("get"))
             {
-                inferredHttpMethod = "Delete";
-                inferredRoute = methodName.Substring(6);
+                httpMethod = "Get";
+                routePart = cleanName.Substring(3);
             }
-            else if (methodName.StartsWith("Post", StringComparison.OrdinalIgnoreCase))
+            else if (lowerName.StartsWith("remove"))
             {
-                inferredHttpMethod = "Post";
-                inferredRoute = methodName.Substring(4);
+                httpMethod = "Delete";
+                routePart = cleanName.Substring(6);
             }
-            else if (methodName.StartsWith("Create", StringComparison.OrdinalIgnoreCase))
+            else if (lowerName.StartsWith("delete"))
             {
-                inferredHttpMethod = "Post";
-                inferredRoute = methodName.Substring(6);
+                httpMethod = "Delete";
+                routePart = cleanName.Substring(6);
             }
-            else if (methodName.StartsWith("Add", StringComparison.OrdinalIgnoreCase))
+            else if (lowerName.StartsWith("post"))
             {
-                inferredHttpMethod = "Post";
-                inferredRoute = methodName.Substring(3);
+                httpMethod = "Post";
+                routePart = cleanName.Substring(4);
             }
-            else if (methodName.StartsWith("Insert", StringComparison.OrdinalIgnoreCase))
+            else if (lowerName.StartsWith("create"))
             {
-                inferredHttpMethod = "Post";
-                inferredRoute = methodName.Substring(6);
+                httpMethod = "Post";
+                routePart = cleanName.Substring(6);
             }
-            else if (methodName.StartsWith("Put", StringComparison.OrdinalIgnoreCase))
+            else if (lowerName.StartsWith("add"))
             {
-                inferredHttpMethod = "Put";
-                inferredRoute = methodName.Substring(3);
+                httpMethod = "Post";
+                routePart = cleanName.Substring(3);
             }
-            else if (methodName.StartsWith("Update", StringComparison.OrdinalIgnoreCase))
+            else if (lowerName.StartsWith("insert"))
             {
-                inferredHttpMethod = "Put";
-                inferredRoute = methodName.Substring(6);
+                httpMethod = "Post";
+                routePart = cleanName.Substring(6);
             }
-            else if (methodName.StartsWith("Modify", StringComparison.OrdinalIgnoreCase))
+            else if (lowerName.StartsWith("put"))
             {
-                inferredHttpMethod = "Put";
-                inferredRoute = methodName.Substring(6);
+                httpMethod = "Put";
+                routePart = cleanName.Substring(3);
+            }
+            else if (lowerName.StartsWith("update"))
+            {
+                httpMethod = "Put";
+                routePart = cleanName.Substring(6);
+            }
+            else if (lowerName.StartsWith("modify"))
+            {
+                httpMethod = "Put";
+                routePart = cleanName.Substring(6);
+            }
+            else if (lowerName.StartsWith("patch"))
+            {
+                httpMethod = "Patch";
+                routePart = cleanName.Substring(5);
             }
             else
             {
-                inferredHttpMethod = "Post";
-                inferredRoute = methodName;
+                httpMethod = "Post";
+                routePart = cleanName;
             }
-
-            // 移除 'Async' 后缀
-            if (inferredRoute.EndsWith(AsyncSuffix, StringComparison.OrdinalIgnoreCase))
+            
+            // 如果截取后的部分为空，直接返回空字符串作为路由
+            if (string.IsNullOrEmpty(routePart))
             {
-                inferredRoute = inferredRoute.Substring(0, inferredRoute.Length - AsyncSuffix.Length);
+                return (httpMethod, "");
+            }
+            
+            // 转换为小写并添加 / 前缀
+            var route = "/" + routePart.ToLowerInvariant();
+            
+            return (httpMethod, route);
+        }
+
+        private static string NormalizeMethodName(string methodName)
+        {
+            var normalized = methodName;
+            
+            // 移除 'Async' 后缀
+            if (normalized.EndsWith(AsyncSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized.Substring(0, normalized.Length - AsyncSuffix.Length);
             }
 
             // 移除 'Service' 后缀
-            if (inferredRoute.EndsWith(ServiceSuffix, StringComparison.OrdinalIgnoreCase))
+            if (normalized.EndsWith(ServiceSuffix, StringComparison.OrdinalIgnoreCase))
             {
-                inferredRoute = inferredRoute.Substring(0, inferredRoute.Length - ServiceSuffix.Length);
+                normalized = normalized.Substring(0, normalized.Length - ServiceSuffix.Length);
             }
 
             // 确保路由以 '/' 开头
-            if (!inferredRoute.StartsWith("/"))
-                inferredRoute = "/" + inferredRoute;
+            if (!normalized.StartsWith("/"))
+                normalized = "/" + normalized;
 
-            return (inferredHttpMethod, inferredRoute);
+            return normalized;
         }
 
-        private class ClassInfo
+        private sealed class ClassInfo
         {
             public string Namespace { get; set; } = string.Empty;
             public string ClassName { get; set; } = string.Empty;
             public string Route { get; set; } = string.Empty;
             public string? Tags { get; set; }
-            public List<AttributeData> AuthorizeAttributes { get; set; } = new List<AttributeData>();
-            public List<AttributeData> FilterAttributes { get; set; } = new List<AttributeData>();
-            public List<IMethodSymbol> Methods { get; set; } = new List<IMethodSymbol>();
+            public List<AttributeData> AuthorizeAttributes { get; set; } = new();
+            public List<AttributeData> FilterAttributes { get; set; } = new();
+            public List<IMethodSymbol> Methods { get; set; } = new();
         }
     }
 }

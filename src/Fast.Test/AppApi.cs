@@ -1,5 +1,6 @@
 ﻿using FastService;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Fast.Test
 {
@@ -8,6 +9,11 @@ namespace Fast.Test
 	public class AppService : FastApi
 	{
 		public Task<string> CreateAsync()
+		{
+			return Task.FromResult("asd");
+		}
+		
+		public Task<string> CreateDataAsync()
 		{
 			return Task.FromResult("asd");
 		}

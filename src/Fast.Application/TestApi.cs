@@ -1,5 +1,6 @@
 ﻿using Fast.Test;
 using FastService;
+using Microsoft.AspNetCore.Http;
 
 namespace Fast.Application
 {
@@ -10,7 +11,7 @@ namespace Fast.Application
 	{
 
 		[EndpointSummary("获取测试接口")]
-		public Task GetAsync()
+		public Task GetAsync(TestInput input)
 		{
 			return Task.FromResult("test");
 		}
@@ -21,7 +22,7 @@ namespace Fast.Application
 		/// <param name="input"></param>
 		/// <returns></returns>
 		[EndpointSummary("测试")]
-		public Task CreateAsync(TestInput input,string name)
+		public Task CreateDataAsync(TestInput input,string name)
 		{
 			return Task.FromResult("test");
 		}

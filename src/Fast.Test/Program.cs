@@ -33,7 +33,6 @@ namespace Fast.Test
                     };
                 });
 
-            builder.Services.WithFast();
             // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
             builder.Services.AddOpenApi();
 
@@ -49,19 +48,15 @@ namespace Fast.Test
             app.UseAuthentication();
             app.UseAuthorization();
 
-            app.MapFast();
+            app.MapFastApis();
 
-            app.MapGet("test",
-                [EndpointSummary("")]
-                () =>
-                {
-
-                }).RequireAuthorization(new AuthorizeAttribute()
+            app.MapGet("test",(string value) => new
             {
-                Roles = ""
-            });
+                value = value,
+                name = "ces"
+			});
 
-            app.Run();
+			app.Run();
         }
     }
 }
